@@ -1,5 +1,6 @@
 #version 300 es
 precision highp float;
+precision highp int;
 precision highp isampler2D;
 
 in vec2 fragCoord;
@@ -23,47 +24,35 @@ ivec4 dataIn[5];
 
 #include "common.glsl"
 
-#define SIG_RES -6 // what [SIGNAL] is set to after signal is lost.
+// Clock:
+int period = 300;
+const int dutyCycle = 50; // %
 
-// checks if a celltype takes input from other celltype
-/*
-bool
-takesInput(int thisType, int otherType)
+#define SIG_RES -6        // what [SIGNAL] is set to after signal is lost.
+
+
+bool isSigCel(int dir) // teturns true if cell in given direction is capable of giving a signal
 {
-  if (thisType >= 10) {                   // logic gate
-    return (otherType == CELLTYPE_INPUT); // only take input from inputs
-  } else {
-    switch (thisType) {
-    case CELLTYPE_WIRE: // takes input from wire, bridge or logic gates
-      return (otherType == CELLTYPE_WIRE || otherType == CELLTYPE_BRIDGE || otherType >= 10);
-      break;
-    case CELLTYPE_INPUT:
-      return (otherType == CELLTYPE_WIRE); // or interconnect?
-      break;
-    }
-  }
+  int cellType = dataIn[dir][CELLTYPE];
+  return cellType == CELLTYPE_WIRE || cellType == CELLTYPE_BRIDGE || cellType == CELLTYPE_INPUT || cellType == CELLTYPE_H2V || cellType == CELLTYPE_V2H || cellType == CELLTYPE_H2V_N || cellType == CELLTYPE_V2H_N;
 }
-*/
-bool
-getWireInput(int dir)
+
+bool getWireInput(int dir) // returns true if cell in given direction feeds signal into calling cell
 {
   int sig = -1;
-  if (dataIn[dir][CELLTYPE] >= 10) { // logic gate or memory type
+  if (dataIn[dir][CELLTYPE] >= 10) { // logic gate, memory or clock
     sig = dataIn[dir][SIGNAL_PRIMA];
   } else
     switch (dataIn[dir][CELLTYPE]) {
     case CELLTYPE_WIRE:
       sig = dataIn[dir][SIGNAL_PRIMA];
       break;
-    case CELLTYPE_CLK:
-      sig = dataIn[dir][SIGNAL_PRIMA];
-      break;
     case CELLTYPE_BRIDGE:
     case CELLTYPE_H2V:
-    case CELLTYPE_H2V_N: 
+    case CELLTYPE_H2V_N:
     case CELLTYPE_V2H:
     case CELLTYPE_V2H_N:
-      if (dir == LEFT || dir == RIGHT) // take directional signal
+      if (dir == LEFT || dir == RIGHT)   // take directional signal
         sig = dataIn[dir][SIGNAL_PRIMA]; // horizontal
       else
         sig = dataIn[dir][SIGNAL_SECON]; // vertical
@@ -72,8 +61,7 @@ getWireInput(int dir)
   return (sig >= 0);
 }
 
-bool
-getInputInput(int dir)
+bool getInputInput(int dir)
 { // get input for input cell
   int sig = -1;
   switch (dataIn[dir][CELLTYPE]) {
@@ -90,13 +78,12 @@ getInputInput(int dir)
   return (sig >= 0);
 }
 
-void
-main()
+void main()
 {
-  dataIn[CENTER] = texture(tex, texCoord);    // 0
+  dataIn[CENTER] = texture(tex, texCoord); // 0
   int cell_type = dataIn[CENTER][CELLTYPE];
 
- // if(cell_type == CELLTYPE_NONE) // optimization causes delete bug
+  // if(cell_type == CELLTYPE_NONE) // optimization causes delete bug
   //  discard;
 
   dataIn[LEFT] = texture(tex, texCoordXmY0);  // 1
@@ -104,9 +91,9 @@ main()
   dataIn[RIGHT] = texture(tex, texCoordXpY0); // 3
   dataIn[UP] = texture(tex, texCoordX0Yp);    // 4
 
-  if (cell_type >= 10) { // logic gate or memory type
-  // read inputs:
-    int numInputs = 0, numHigh = 0; 
+  if (cell_type >= 10 && cell_type < 30) {    // logic gate or memory type
+                                              // read inputs:
+    int numInputs = 0, numHigh = 0;
     if (dataIn[LEFT][CELLTYPE] == CELLTYPE_INPUT) {
       numInputs++;
       if (dataIn[LEFT][SIGNAL_PRIMA] >= 0) // -1 is low 0 is high!
@@ -158,17 +145,17 @@ main()
         break;
       case CELLTYPE_MEM:
         if (dataIn[CENTER][SIGNAL_PRIMA] < 0) {    // is low
-            if (numHigh == 2){ // set high
-              dataIn[CENTER][SIGNAL_PRIMA] = 0;
-              dataIn[CENTER][SIGNAL_SECON] = 0; // make not resetable
-            }
-        } else {                               // is high
-        if (dataIn[CENTER][SIGNAL_SECON] >= 0) { // not resettable
+          if (numHigh == 2) {                      // set high
+            dataIn[CENTER][SIGNAL_PRIMA] = 0;
+            dataIn[CENTER][SIGNAL_SECON] = 0;      // make not resetable
+          }
+        } else {                                   // is high
+          if (dataIn[CENTER][SIGNAL_SECON] >= 0) { // not resettable
             if (numHigh == 0)                      // Make resettable
               dataIn[CENTER][SIGNAL_SECON] = -1;
-          } else {            // resettable
-            if (numHigh == 1) // reset
-              dataIn[CENTER][SIGNAL_PRIMA] = -1; // set low
+          } else {                                 // resettable
+            if (numHigh == 1)                      // reset
+              dataIn[CENTER][SIGNAL_PRIMA] = -1;   // set low
           }
         }
         break;
@@ -192,14 +179,14 @@ main()
         else if (getWireInput(DOWN))
           dataIn[CENTER][SIGNAL_PRIMA] = DOWN;
 
-      } else { // already has signal source
+      } else {                                                  // already has signal source
 
         if (dataIn[CENTER][SIGNAL_PRIMA] == CENTER) {           // this is source
           dataIn[CENTER][SIGNAL_PRIMA] = SIG_RES;               // turn of source
         } else if (!getWireInput(dataIn[CENTER][SIGNAL_PRIMA])) // if source lost signal
           dataIn[CENTER][SIGNAL_PRIMA] = SIG_RES;               // this also loses signal
       }
-      dataIn[CENTER][SIGNAL_SECON] = -1; // turn of secondary signal, not used
+      dataIn[CENTER][SIGNAL_SECON] = -1;                        // turn of secondary signal, not used
       break;
     case CELLTYPE_BRIDGE:
 
@@ -208,10 +195,10 @@ main()
         dataIn[CENTER][SIGNAL_PRIMA]++;                // count back up to 0 to reset
       } else if (dataIn[CENTER][SIGNAL_PRIMA] == -1) { // low, open to recieve
         if (getWireInput(LEFT))
-          dataIn[CENTER][SIGNAL_PRIMA] = LEFT; // set left as source
+          dataIn[CENTER][SIGNAL_PRIMA] = LEFT;         // set left as source
         else if (getWireInput(RIGHT))
           dataIn[CENTER][SIGNAL_PRIMA] = RIGHT;
-      } else { // already has signal source
+      } else {                                                  // already has signal source
         if (dataIn[CENTER][SIGNAL_PRIMA] == CENTER) {           // this is source
           dataIn[CENTER][SIGNAL_PRIMA] = SIG_RES;               // turn of source
         } else if (!getWireInput(dataIn[CENTER][SIGNAL_PRIMA])) // if source lost signal
@@ -227,7 +214,7 @@ main()
           dataIn[CENTER][SIGNAL_SECON] = DOWN;
         else if (getWireInput(UP))
           dataIn[CENTER][SIGNAL_SECON] = UP;
-      } else { // already has signal source
+      } else {                                        // already has signal source
         if (dataIn[CENTER][SIGNAL_SECON] == CENTER) { // this is source
           dataIn[CENTER][SIGNAL_SECON] = SIG_RES;     // turn of source
           // lostSignal(int dir) { return dataIn[dir][SIGNAL_PRIMA] <= -1
@@ -236,17 +223,17 @@ main()
       }
 
       break;
-      case CELLTYPE_H2V:
+    case CELLTYPE_H2V:
 
       // HORIZONTAL SIGNAL
       if (dataIn[CENTER][SIGNAL_PRIMA] < -1) {         // imune from signal
         dataIn[CENTER][SIGNAL_PRIMA]++;                // count back up to 0 to reset
       } else if (dataIn[CENTER][SIGNAL_PRIMA] == -1) { // low, open to recieve
         if (getWireInput(LEFT))
-          dataIn[CENTER][SIGNAL_PRIMA] = LEFT; // set left as source
+          dataIn[CENTER][SIGNAL_PRIMA] = LEFT;         // set left as source
         else if (getWireInput(RIGHT))
           dataIn[CENTER][SIGNAL_PRIMA] = RIGHT;
-      } else { // already has signal source
+      } else {                                                  // already has signal source
         if (dataIn[CENTER][SIGNAL_PRIMA] == CENTER) {           // this is source
           dataIn[CENTER][SIGNAL_PRIMA] = SIG_RES;               // turn of source
         } else if (!getWireInput(dataIn[CENTER][SIGNAL_PRIMA])) // if source lost signal
@@ -269,25 +256,25 @@ main()
         else if (getWireInput(RIGHT))
           dataIn[CENTER][SIGNAL_SECON] = RIGHT;
 
-      } else { // already has signal source
-        if (dataIn[CENTER][SIGNAL_SECON] == CENTER) { // this is source
-          dataIn[CENTER][SIGNAL_SECON] = SIG_RES;     // turn of source
+      } else {                                                  // already has signal source
+        if (dataIn[CENTER][SIGNAL_SECON] == CENTER) {           // this is source
+          dataIn[CENTER][SIGNAL_SECON] = SIG_RES;               // turn of source
         } else if (!getWireInput(dataIn[CENTER][SIGNAL_SECON])) // if source lost signal
           dataIn[CENTER][SIGNAL_SECON] = SIG_RES;               // this also loses signal
       }
 
       break;
-      case CELLTYPE_H2V_N:
+    case CELLTYPE_H2V_N:
 
       // HORIZONTAL SIGNAL
       if (dataIn[CENTER][SIGNAL_PRIMA] < -1) {         // imune from signal
         dataIn[CENTER][SIGNAL_PRIMA]++;                // count back up to 0 to reset
       } else if (dataIn[CENTER][SIGNAL_PRIMA] == -1) { // low, open to recieve
         if (getWireInput(LEFT))
-          dataIn[CENTER][SIGNAL_PRIMA] = LEFT; // set left as source
+          dataIn[CENTER][SIGNAL_PRIMA] = LEFT;         // set left as source
         else if (getWireInput(RIGHT))
           dataIn[CENTER][SIGNAL_PRIMA] = RIGHT;
-      } else { // already has signal source
+      } else {                                                  // already has signal source
         if (dataIn[CENTER][SIGNAL_PRIMA] == CENTER) {           // this is source
           dataIn[CENTER][SIGNAL_PRIMA] = SIG_RES;               // turn of source
         } else if (!getWireInput(dataIn[CENTER][SIGNAL_PRIMA])) // if source lost signal
@@ -305,43 +292,42 @@ main()
           dataIn[CENTER][SIGNAL_SECON] = UP;
 
         // take input from horizontal input and put into vertical signal
-        else if (!getWireInput(LEFT))
+        else if (isSigCel(LEFT) && !getWireInput(LEFT))
           dataIn[CENTER][SIGNAL_SECON] = LEFT;
-        else if (!getWireInput(RIGHT))
+        else if (isSigCel(RIGHT) && !getWireInput(RIGHT))
           dataIn[CENTER][SIGNAL_SECON] = RIGHT;
 
-      } else { // already has signal source
+      } else {                                        // already has signal source
         if (dataIn[CENTER][SIGNAL_SECON] == CENTER) { // this is source
           dataIn[CENTER][SIGNAL_SECON] = SIG_RES;     // turn of source
-        } else{ // other source
+        } else {                                      // other source
 
-        switch(dataIn[CENTER][SIGNAL_SECON])
-        {
-         case UP:
-         case DOWN:
-        if(!getWireInput(dataIn[CENTER][SIGNAL_SECON])) // has no signal
-          dataIn[CENTER][SIGNAL_SECON] = SIG_RES;       // this also loses signal
-        break;
+          switch (dataIn[CENTER][SIGNAL_SECON]) {
+          case UP:
+          case DOWN:
+            if (!getWireInput(dataIn[CENTER][SIGNAL_SECON])) // has no signal
+              dataIn[CENTER][SIGNAL_SECON] = SIG_RES;        // this also loses signal
+            break;
 
-        case LEFT:
-        case RIGHT:
-        if(getWireInput(dataIn[CENTER][SIGNAL_SECON])) // has signal
-          dataIn[CENTER][SIGNAL_SECON] = SIG_RES;       // this loses signal because inverted
+          case LEFT:
+          case RIGHT:
+            if (!isSigCel(dataIn[CENTER][SIGNAL_SECON]) || getWireInput(dataIn[CENTER][SIGNAL_SECON])) // has signal
+              dataIn[CENTER][SIGNAL_SECON] = SIG_RES;                                                  // this loses signal because inverted
 
-        break;
-        }
+            break;
+          }
         }
       }
 
       break;
-      case CELLTYPE_V2H:
+    case CELLTYPE_V2H:
 
       // HORIZONTAL SIGNAL
       if (dataIn[CENTER][SIGNAL_PRIMA] < -1) {         // imune from signal
         dataIn[CENTER][SIGNAL_PRIMA]++;                // count back up to 0 to reset
       } else if (dataIn[CENTER][SIGNAL_PRIMA] == -1) { // low, open to recieve
         if (getWireInput(LEFT))
-          dataIn[CENTER][SIGNAL_PRIMA] = LEFT; // set left as source
+          dataIn[CENTER][SIGNAL_PRIMA] = LEFT;         // set left as source
         else if (getWireInput(RIGHT))
           dataIn[CENTER][SIGNAL_PRIMA] = RIGHT;
 
@@ -353,8 +339,7 @@ main()
           dataIn[CENTER][SIGNAL_PRIMA] = UP;
 
 
-
-      } else { // already has signal source
+      } else {                                                  // already has signal source
         if (dataIn[CENTER][SIGNAL_PRIMA] == CENTER) {           // this is source
           dataIn[CENTER][SIGNAL_PRIMA] = SIG_RES;               // turn of source
         } else if (!getWireInput(dataIn[CENTER][SIGNAL_PRIMA])) // if source lost signal
@@ -371,9 +356,68 @@ main()
         else if (getWireInput(UP))
           dataIn[CENTER][SIGNAL_SECON] = UP;
 
-      } else { // already has signal source
-        if (dataIn[CENTER][SIGNAL_SECON] == CENTER) { // this is source
-          dataIn[CENTER][SIGNAL_SECON] = SIG_RES;     // turn of source
+      } else {                                                  // already has signal source
+        if (dataIn[CENTER][SIGNAL_SECON] == CENTER) {           // this is source
+          dataIn[CENTER][SIGNAL_SECON] = SIG_RES;               // turn of source
+        } else if (!getWireInput(dataIn[CENTER][SIGNAL_SECON])) // if source lost signal
+          dataIn[CENTER][SIGNAL_SECON] = SIG_RES;               // this also loses signal
+      }
+
+      break;
+    case CELLTYPE_V2H_N: // ***************
+
+      // HORIZONTAL SIGNAL
+      if (dataIn[CENTER][SIGNAL_PRIMA] < -1) {         // imune from signal
+        dataIn[CENTER][SIGNAL_PRIMA]++;                // count back up to 0 to reset
+      } else if (dataIn[CENTER][SIGNAL_PRIMA] == -1) { // low, open to recieve
+        if (getWireInput(LEFT))
+          dataIn[CENTER][SIGNAL_PRIMA] = LEFT;         // set left as source
+        else if (getWireInput(RIGHT))
+          dataIn[CENTER][SIGNAL_PRIMA] = RIGHT;
+
+
+        // take inverted input from vertical line and put into horizontal signal
+        else if (isSigCel(UP) && !getWireInput(UP))
+          dataIn[CENTER][SIGNAL_PRIMA] = UP;
+        else if (isSigCel(DOWN) && !getWireInput(DOWN))
+          dataIn[CENTER][SIGNAL_PRIMA] = DOWN;
+
+      } else {                                        // already has signal source
+        if (dataIn[CENTER][SIGNAL_PRIMA] == CENTER) { // this is source
+          dataIn[CENTER][SIGNAL_PRIMA] = SIG_RES;     // turn of source
+        } else {                                      // other source
+
+          switch (dataIn[CENTER][SIGNAL_PRIMA]) {
+          case UP:
+          case DOWN:                                                                                   // SIGNAL_PRIMA
+            if (!isSigCel(dataIn[CENTER][SIGNAL_PRIMA]) || getWireInput(dataIn[CENTER][SIGNAL_PRIMA])) // has signal
+              dataIn[CENTER][SIGNAL_PRIMA] = SIG_RES;                                                  // this loses signal because inverted
+            break;
+
+          case LEFT:
+          case RIGHT:
+            if (!getWireInput(dataIn[CENTER][SIGNAL_PRIMA])) // has no signal
+              dataIn[CENTER][SIGNAL_PRIMA] = SIG_RES;        // this also loses signal
+
+            break;
+          }
+        }
+      }
+
+
+      // VERTICAL SIGNAL
+      if (dataIn[CENTER][SIGNAL_SECON] < -1) {         // imune from signal
+        dataIn[CENTER][SIGNAL_SECON]++;                // count back up to 0 to reset
+      } else if (dataIn[CENTER][SIGNAL_SECON] == -1) { // low, open to recieve
+
+        if (getWireInput(DOWN))
+          dataIn[CENTER][SIGNAL_SECON] = DOWN;
+        else if (getWireInput(UP))
+          dataIn[CENTER][SIGNAL_SECON] = UP;
+
+      } else {                                                  // already has signal source
+        if (dataIn[CENTER][SIGNAL_SECON] == CENTER) {           // this is source
+          dataIn[CENTER][SIGNAL_SECON] = SIG_RES;               // turn of source
         } else if (!getWireInput(dataIn[CENTER][SIGNAL_SECON])) // if source lost signal
           dataIn[CENTER][SIGNAL_SECON] = SIG_RES;               // this also loses signal
       }
@@ -381,24 +425,28 @@ main()
       break;
     case CELLTYPE_INPUT:
       if (getInputInput(LEFT))
-        dataIn[CENTER][SIGNAL_PRIMA] = 0; // set high
+        dataIn[CENTER][SIGNAL_PRIMA] = 0;  // set high
       else if (getInputInput(RIGHT))
-        dataIn[CENTER][SIGNAL_PRIMA] = 0; // set high
+        dataIn[CENTER][SIGNAL_PRIMA] = 0;  // set high
       else if (getInputInput(UP))
-        dataIn[CENTER][SIGNAL_PRIMA] = 0; // set high
+        dataIn[CENTER][SIGNAL_PRIMA] = 0;  // set high
       else if (getInputInput(DOWN))
-        dataIn[CENTER][SIGNAL_PRIMA] = 0; // set high
+        dataIn[CENTER][SIGNAL_PRIMA] = 0;  // set high
       else
         dataIn[CENTER][SIGNAL_PRIMA] = -1; // set low
 
       break;
     case CELLTYPE_CLK:
-      int dutyCycle = 600;
-      bool isHigh = IterNum % dutyCycle > dutyCycle / 2;
-      dataIn[CENTER][SIGNAL_PRIMA] = int(isHigh) - 1;
+      dataIn[CENTER][SIGNAL_PRIMA] = int(IterNum % period > period * (100 - dutyCycle) / 100) - 1;
+      break;
+    case CELLTYPE_CLK_2:
+      dataIn[CENTER][SIGNAL_PRIMA] = int(IterNum % (period * 2) > period * 2 * (100 - dutyCycle) / 100) - 1;
+      break;
+    case CELLTYPE_CLK_4:
+      dataIn[CENTER][SIGNAL_PRIMA] = int(IterNum % (period * 4) > period * 4 * (100 - dutyCycle) / 100) - 1;
       break;
     case CELLTYPE_NONE:
-    default:                           
+    default:
       dataIn[CENTER][SIGNAL_PRIMA] = -1; // no signal
       dataIn[CENTER][SIGNAL_SECON] = -1; // no signal
     }

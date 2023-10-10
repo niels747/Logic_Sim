@@ -3,9 +3,8 @@ GUI:
 - [x] Make slider change when number is changed externally
 - [x] Make slider constrain value between min and max
 - [x] Add select input with text options
-- [x] Structure code!
 - [x] Put internal variables in seperate private object
-- [ ] Add checkbox input that can toggle boolean
+- [x] Add checkbox input that can toggle boolean
 - [ ] Add button input that can call any function
 - [ ] Add styling
 - [ ] Optimize code
@@ -20,28 +19,27 @@ SIMULATOR:
 - [ ] Implement undo and redo functions
 - [ ] Implement rotate and mirror selection functions
 - [ ] Make importing exporting components possible
-- [ ] Make area expandable
+- [ ] Make area resizeable
 
 
 EXAMPLE FILE:
 - [x] Build 7 segment decoder
+- [x] Build BCD decoder for 2 digit 7 segment display
 - [x] Build 4 bit adder
+- [x] Build 4 bit 8 word ROM
 - [x] Build 4 bit 8 word RAM
 - [ ] Build simple 4 operation 1 bit ALU: 00    01    10    11
 - [ ] Build simple 4 operation 4 bit ALU: OR    NOT   ADD   AND
 - [ ] Extend RAM to 16 4 bit words
-- [ ] Build ROM/pram memory
+- [ ] Build ROM/program memory
 - [ ] Build program counter
 - [ ] Design instruction set
 - [ ] Build control unit
 - [ ] Build complete 4 bit computer
-
-- [ ] Build BCD decoder for 2 digit 7 segment display
-- [ ] Build pixel display
-- [ ] Build gpu for drawing to display more effiently
-
 - [ ] Extend everything to 8 bit
-- [ ] 64 bit?
-- [ ] Run crisis on it
-
-
+- [ ] Build pixel display
+- [ ] Draw plots
+- [ ] Draw shapes
+- [ ] Build gpu for drawing to display more effiently
+- [ ] 3D rendering
+- [ ] Run crisis

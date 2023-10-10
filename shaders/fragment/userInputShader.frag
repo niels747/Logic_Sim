@@ -23,19 +23,18 @@ uniform ivec2 pasteSize;       // dimensions of the copied texture
 out ivec4 dataOut;
 
 #define DELETE 100
-#define PASTE  101
+#define PASTE 101
 
 #include "common.glsl"
 
-void
-main()
+void main()
 {
   ivec2 fragLoc = ivec2(fragCoord);
   dataOut = texture(tex, texCoord);
 
   bool applyInput = false;
 
-  if (selection.x != -1) {           // there is a selection
+  if (selection.x != -1) {                // there is a selection
     if (userInputValues[TYPE] == PASTE) { // paste
 
       ivec2 loc = ivec2(fragLoc.x - selection.x, fragLoc.y - selection.y);
@@ -53,7 +52,7 @@ main()
   }
 
   if (applyInput) {
-    if (userInputValues[TYPE] > 0) { // input given
+    if (userInputValues[TYPE] != 0) {      // input given
 
       if (userInputValues[TYPE] == 1000) { // set signal
         if (userInputValues[REVERSE] == 1) {
@@ -63,7 +62,7 @@ main()
           dataOut[SIGNAL_PRIMA] = 0;
           dataOut[SIGNAL_SECON] = 0;
         }
-      } else {                       // set CELLTYPE
+      } else {                             // set CELLTYPE
         if (userInputValues[REVERSE] == 1) // remove
           dataOut[CELLTYPE] = CELLTYPE_NONE;
         else
