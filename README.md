@@ -2,17 +2,10 @@
 
 This projects objective is to produce a visually pleasing and interactive simulation of logical circuits, from very simple , to full computers.
 
-It works using a grid based system where signals propagate 1 cell per timestep. A sort of Cellular automaton for digital circuits.
-
-#Cell Types
-A cell can have many different types ranging from simple wire to logic gates.
-
+It works using a grid based system where signals can only propagate 1 cell per timestep.
 Basic wire cells propagate signals in all 4 directions, while bridge cells allow vertical and horizontal signals to remain seperate.
 ![image](https://github.com/niels747/Logic_Sim/assets/42830240/81da2360-6d3d-496f-b335-12d81e893a22)
 
-
-The simulation includes all basic logic gates: AND, OR, NOT, NOR, XOR, NAND and XNOR
-But to allow for more compact full adder circuits, there is also a SUM and CARRY gate.
 
 Logic gates with 1, 2 or 3 iputs can be used
 ![image](https://github.com/niels747/Logic_Sim/assets/42830240/c7cd785f-6fac-49c2-a504-25ebefab7aea)
@@ -32,3 +25,4 @@ The custom gui used in this project is also being developed simultaneously.
 Eventually this gui could also replace dat.gui in 2D_weather_sandbox.
 
 ![image](https://github.com/niels747/Logic_Sim/assets/42830240/44e637a7-eb03-457b-b589-67ba0acb8473)
+
