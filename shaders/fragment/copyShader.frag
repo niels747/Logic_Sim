@@ -1,12 +1,12 @@
 #version 300 es
 precision highp float;
-precision highp isampler2D;
+precision highp usampler2D;
 
 in vec2 fragCoord;
 
 in vec2 texCoord; // this
 
-uniform isampler2D tex;
+uniform usampler2D tex;
 
 uniform vec2 resolution;
 uniform vec2 texelSize;
@@ -14,11 +14,12 @@ uniform vec2 texelSize;
 uniform ivec4 selection; // startX startY endX endY
                          // 100    100    150  150
 
-out ivec4 dataOut;
+out uvec4 dataOut;
 
 #include "common.glsl"
 
-void main() {
+void main()
+{
   ivec2 fragLoc = ivec2(fragCoord);
 
   ivec2 copyFrom = ivec2(fragLoc.x + selection[0], fragLoc.y + selection[1]);

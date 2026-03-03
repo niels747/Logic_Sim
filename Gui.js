@@ -86,7 +86,33 @@ class Gui
     select.oninput = function() { intVarsRef[name] = select.value; };
   }
 
-  addSlider(name, min, max, step = 1)
+  addIntSlider(name, min, max, step = 1)
+  {
+    let row = this.#addRow();
+    row.appendChild(this.#createLabel(name));
+    let val = min;
+    let slider = this.#appendSlider(row);
+    slider.id = 'GUI_' + name;
+    slider.min = min;
+    slider.max = max;
+    slider.step = step;
+    slider.value = val;
+    slider.style.width = '220px';
+    let output = document.createElement('output');
+    output.htmlFor = 'GUI_' + name;
+    output.value = val;
+    let td = document.createElement('td');
+    td.appendChild(output);
+    row.appendChild(td);
+    this.#addProp(name, val, 'num', slider, output);
+    let intVarsRef = this.intVars;
+    slider.oninput = function() {
+      output.value = slider.value;
+      intVarsRef[name] = parseInt(slider.value);
+    };
+  }
+
+  addFloatSlider(name, min, max, step = 0.1)
   {
     let row = this.#addRow();
     row.appendChild(this.#createLabel(name));

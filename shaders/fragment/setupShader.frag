@@ -7,15 +7,14 @@ uniform vec2 texelSize;
 in vec2 texCoord;
 in vec2 fragCoord;
 
-// ivec2 fragLoc;
-
-out ivec4 dataOut;
+out uvec4 dataOut;
 
 #include "common.glsl"
 
-void main() {
+void main()
+{
   ivec2 fragLoc = ivec2(fragCoord);
-  ivec4 data = ivec4(0, -1, -1, 0);
+  ivec4 data = ivec4(0);
 
   for (int i = 0; i < 8; i++) { // create all getes with 3 inputs
     int Y = i * 7;
@@ -37,8 +36,6 @@ void main() {
 
   if (fragLoc.x == 50) {
     data[CELLTYPE] = CELLTYPE_WIRE;
-    if ((fragLoc.y + 4) % 7 == 0)
-      data[CELLTYPE] = CELLTYPE_BRIDGE;
   }
-  dataOut = data;
+  dataOut = uvec4(data);
 }

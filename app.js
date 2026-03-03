@@ -12,10 +12,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 var canvas;
 var gl;
 
-// const degToRad = 0.0174533;
-// const radToDeg = 57.2957795;
-
-const saveFileVersionID = 2172535; // Uint32 id to check if save file is compatible
+const saveFileVersionID = 9481284; // Uint32 id to check if save file is compatible
 
 var saveFileName = '';
 
@@ -43,6 +40,8 @@ var selectionMinY = -1;
 var selectionMaxX = -1;
 var selectionMaxY = -1;
 
+var copyTexbuf;
+
 var selection = false; // bool if there is currently a selection
 
 // actions:
@@ -52,10 +51,13 @@ const COPY = Symbol('COPY');
 const CUT = Symbol('CUT');
 const PASTE = Symbol('PASTE');
 
-var ACTION = NONE; // one of the above actions that is executed once
+const ASCII_OFFSET = 1000; // how ASCII characters are offset in celltype
+
+var ACTION = NONE;         // one of the above actions that is executed once
 
 
-// var controls = {paused: false, displayMode: 1};
+var doOneIter = false;
+
 
 class TexBuf
 { // combines texture, framebuffer and resolution
@@ -64,14 +66,14 @@ class TexBuf
   width;
   height;
 
-  constructor(height, width)
+  constructor(width, height, initialTex = null)
   {
     this.width = width;
     this.height = height;
 
     this.texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8I, width, height, 0, gl.RGBA_INTEGER, gl.BYTE, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16UI, width, height, 0, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, initialTex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -131,6 +133,75 @@ function min(num1, num2)
     return num2;
 }
 
+const openSaveFile = async () => {
+  const pickerOptions = {
+    types : [
+      {description : 'Logic Simulator Files', accept : {'application/x-logicsim' : [ '.logicsim' ]}},
+    ],
+    excludeAcceptAllOption : true
+  };
+  try {
+    const [handle] = await window.showOpenFilePicker(pickerOptions);
+    const file = await handle.getFile();
+    loadSaveFile(file);
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      console.error('Error selecting file:', err);
+    }
+  }
+};
+
+async function loadSaveFile(file)
+{
+  let versionBlob = file.slice(0, 4);           // extract first 4 bytes containing version id
+  let versionBuf = await versionBlob.arrayBuffer();
+  let version = new Uint32Array(versionBuf)[0]; // convert to Uint32
+
+  if (version == saveFileVersionID) {
+    // check version id, only proceed if file has the right version id
+    let fileArrBuf = await file.slice(4);
+    dataBlob = fileArrBuf;
+
+    let sliceStart = 0;
+    let sliceEnd = 4;
+
+    let resBlob = dataBlob.slice(sliceStart, sliceEnd); // extract first 4 bytes containing resolution
+    let resBuf = await resBlob.arrayBuffer();
+    let resArray = new Uint16Array(resBuf);
+    resX = resArray[0];
+    resY = resArray[1];
+
+    saveFileName = file.name;
+
+    if (saveFileName.includes('.')) {
+      saveFileName = saveFileName.split('.').slice(0, -1).join('.'); // remove extension
+    }
+
+    console.log('loading file: ' + saveFileName);
+    console.log('File versionID: ' + version);
+    console.log('sim_res_x: ' + resX);
+    console.log('sim_res_y: ' + resY);
+
+    sliceStart = sliceEnd;
+    sliceEnd += resX * resY * 4 * 2; // 4 values of 2 bytes (16 bit) per cell
+    let texBlob = dataBlob.slice(sliceStart, sliceEnd);
+    let texBuf = await texBlob.arrayBuffer();
+    let texUi16 = new Uint16Array(texBuf);
+
+    sliceStart = sliceEnd;
+    let settingsArrayBlob = dataBlob.slice(sliceStart); // until end of file
+
+    controlsFromSaveFile = await settingsArrayBlob.text();
+
+    copyTexbuf = new TexBuf(resX, resY, texUi16); // put loaded data into copy texture
+
+  } else {
+    // wrong id
+    alert('Incompatible file!');
+    document.getElementById('fileInput').value = ''; // clear file
+  }
+}
+
 async function loadData()
 {
   let file = document.getElementById('fileInput').files[0];
@@ -143,13 +214,7 @@ async function loadData()
     if (version == saveFileVersionID) {
       // check version id, only proceed if file has the right version id
       let fileArrBuf = await file.slice(4);
-      /*.arrayBuffer();*/ // slice from behind version id to the end of the
-      // file
-      // let fileUint8Arr = new Uint8Array(fileArrBuf); // convert to Uint8Array
-      // for pako let decompressed = window.pako.inflate(fileUint8Arr); //
-      // uncompress let dataBlob = new Blob([decompressed]); // turn into blob
-
-      dataBlob = fileArrBuf; // not compressed
+      dataBlob = fileArrBuf;
 
       let sliceStart = 0;
       let sliceEnd = 4;
@@ -172,17 +237,17 @@ async function loadData()
       console.log('sim_res_y: ' + sim_res_y);
 
       sliceStart = sliceEnd;
-      sliceEnd += sim_res_x * sim_res_y * 4 * 1;
+      sliceEnd += sim_res_x * sim_res_y * 4 * 2; // 4 values of 2 bytes (16 bit) per cell
       let texBlob = dataBlob.slice(sliceStart, sliceEnd);
       let texBuf = await texBlob.arrayBuffer();
-      let texI8 = new Int8Array(texBuf);
+      let texUi16 = new Uint16Array(texBuf);
 
       sliceStart = sliceEnd;
       let settingsArrayBlob = dataBlob.slice(sliceStart); // until end of file
 
       controlsFromSaveFile = await settingsArrayBlob.text();
 
-      mainScript(texI8);
+      mainScript(texUi16);
     } else {
       // wrong id
       alert('Incompatible file!');
@@ -231,29 +296,30 @@ async function mainScript(initialTex)
   element.parentNode.removeChild(element); // remove introscreen div
 
 
-  ///////////////////////////////////////////////////////////// GUI DEV
+  ///////////////////////////////////////////////////////////// GUI
 
 
   const guiControls = {}; // object where all controllable variables are stored
 
   gui = new Gui(guiControls, 350, 500);
-  gui.addSlider('iterPerFrame', 1, 50);
-  gui.addSlider('clockSpeed', 1, 100);
+  gui.addIntSlider('iterPerFrame', 1, 100);
 
-  gui.addSelect('displayMode', 'All', 'Signal direction');
+  guiControls.iterPerFrame = 10;
 
-  gui.addSelect('tool', 'select', 'text', 'signal', 'wire', 'bridge', 'input', 'or', 'nor', 'and', 'nand', 'xor', 'xnor', 'sum', 'carry', 'mem', 'clk', 'clk_2', 'clk_4', 'v2h', 'v2hn', 'h2v', 'h2vn');
+  gui.addFloatSlider('clockSpeed', 1, 20);
+
+  guiControls.clockSpeed = 10;
+
+  gui.addSelect('displayMode', 'All', 'Signal direction', 'Displays');
+
+  gui.addSelect('tool', 'select', 'text', 'signal', 'wire', 'bridge', 'input', 'or', 'not/nor', 'and', 'nand', 'xor', 'xnor', 'sum', 'carry', 'mem', 'clk_input', 'clk', 'clk/2', 'clk/4', 'clk/8', 'v2h', 'v2hn', 'h2v', 'h2vn', 'display');
+
+  gui.addSelect('pasteRotation', 'none', '90', '180', '270');
 
   gui.addToggle('paused');
 
-  // guiControls.iterPerFrame = 10;
 
-  // guiControls.example = 0.8;
-
-  // guiControls.tool = 'signal';
-
-
-  ////////////////////////////////////////////////////// END of GUI DEV
+  ////////////////////////////////////////////////////// END of GUI
 
 
   const sim_aspect = sim_res_x / sim_res_y;
@@ -277,6 +343,44 @@ async function mainScript(initialTex)
 
   function hexStr(val) { return '0x' + val.toString(16).padStart(2, '0'); }
 
+  function cellTypeToStr(cellType)
+  {
+    switch (cellType) {
+    case 0:
+      return 'NONE';
+    case 1:
+      return 'WIRE';
+    case 2:
+      return 'BRIDGE';
+    case 3:
+      return 'INPUT';
+    default:
+      return 'OTHER';
+    }
+  }
+
+  function getDirection(signalByte)
+  {
+    let dir = signalByte >> 13;
+    switch (dir) {
+    case 0:
+      return 'NONE';
+    case 1:
+      return 'CENTER';
+    case 2:
+      return 'LEFT';
+    case 3:
+      return 'DOWN';
+    case 4:
+      return 'RIGHT';
+    case 5:
+      return 'UP';
+    case 6:
+      return 'IMUNE';
+    }
+  }
+  function getDistance(signalByte) { return signalByte & 8191; }
+
   function logSample()
   {
     // mouse position in sim coordinates
@@ -285,16 +389,16 @@ async function mainScript(initialTex)
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, frameBuff_0);
     gl.readBuffer(gl.COLOR_ATTACHMENT0); // basetexture
-    var baseTextureValues = new Int8Array(4);
-    gl.readPixels(simXpos, simYpos, 1, 1, gl.RGBA_INTEGER, gl.BYTE,
+    var baseTextureValues = new Uint16Array(4);
+    gl.readPixels(simXpos, simYpos, 1, 1, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT,
                   baseTextureValues); // read single cell
 
     console.log('');
     console.log('');
     console.log('Sample at:      X: ' + simXpos, '  Y: ' + simYpos);
-    console.log('0 CELTYPE:', baseTextureValues[0], '\t', hexStr(baseTextureValues[0]), '\t', binStr(baseTextureValues[0]));
-    console.log('1 SIG PRIM', baseTextureValues[1]);
-    console.log('2 SIG SECO', baseTextureValues[2]);
+    console.log('0 CELTYPE:', baseTextureValues[0], '\t', cellTypeToStr(baseTextureValues[0]));
+    console.log('1 SIG PRIM', binStr(baseTextureValues[1]), '   ' + getDirection(baseTextureValues[1]), '      DIST: ' + getDistance(baseTextureValues[1]));
+    console.log('2 SIG SECO', binStr(baseTextureValues[2]), '   ' + getDirection(baseTextureValues[2]), '      DIST: ' + getDistance(baseTextureValues[2]));
   }
 
   var middleMousePressed = false;
@@ -398,8 +502,8 @@ async function mainScript(initialTex)
     if (event.button == 0) { // left mouse
       leftMousePressed = true;
       if (guiControls.tool == 'select') {
-        selectionStartX = mouseXinSim * sim_res_x;
-        selectionStartY = mouseYinSim * sim_res_y;
+        selectionStartX = Math.floor(mouseXinSim * sim_res_x);
+        selectionStartY = Math.floor(mouseYinSim * sim_res_y);
         selection = true;
       }
     } else if (event.button == 1) { // middle mouse
@@ -505,7 +609,7 @@ async function mainScript(initialTex)
       console.log('CTRL + S');
     } else if (event.code == "Space") {
       // space bar
-      console.log("SPACE");
+      // console.log("SPACE");
       guiControls.paused = !guiControls.paused;
     } else if (event.code == 'KeyD') {
       // download
@@ -516,7 +620,7 @@ async function mainScript(initialTex)
             viewYpos = 0.0; // match bottem to bottem of screen
             viewZoom = 0.8;
     }*/
-    else if (event.key >= 1 && event.key <= 3) {
+    else if (event.key >= 1 && event.key <= displayPrograms.length) {
       gui.setSelectedIndex('displayMode', event.key - 1);
     } else if (event.key == 'ArrowLeft') {
       leftPressed = true;  // <
@@ -561,6 +665,8 @@ async function mainScript(initialTex)
       // guiControls.tool = '';
     } else if (event.code == 'KeyF') {
       // guiControls.tool = '';
+      guiControls.paused = true;
+      doOneIter = true;
     } else if (event.code == 'KeyG') {
       // guiControls.tool = '';
     } else if (event.code == 'KeyH') {
@@ -570,7 +676,7 @@ async function mainScript(initialTex)
     } else if (event.code == 'KeyK') {
       // guiControls.tool = '';
     } else if (event.code == 'KeyL') {
-      // guiControls.tool = '';
+      openSaveFile();
     } else if (event.code == 'KeyZ') {
       if (ctrlPressed) {
         // console.log('undo');
@@ -599,7 +705,7 @@ async function mainScript(initialTex)
     } else if (event.code == 'KeyB') {
       guiControls.tool = 'bridge';
     } else if (event.code == 'KeyN') {
-      guiControls.tool = 'nor';
+      guiControls.tool = 'not/nor';
     } else if (event.code == 'KeyM') {
       guiControls.tool = 'mem';
     } else if (event.key == 'PageUp') {
@@ -648,19 +754,16 @@ async function mainScript(initialTex)
   const userInputShader = await loadShader('userInputShader.frag');
   const copyShader = await loadShader('copyShader.frag');
 
-  const displayShader1 = await loadShader('displayShader1.frag');
-  const displayShader2 = await loadShader('displayShader2.frag');
-  const displayShader3 = await loadShader('displayShader3.frag');
-
   // create programs
   const setupProgram = createProgram(simVertexShader, setupShader);
   const logicProgram = createProgram(simVertexShader, logicShader);
   const userInputProgram = createProgram(simVertexShader, userInputShader);
   const copyProgram = createProgram(simVertexShader, copyShader);
 
-  const displayProgram1 = createProgram(dispVertexShader, displayShader1);
-  const displayProgram2 = createProgram(dispVertexShader, displayShader2);
-  const displayProgram3 = createProgram(dispVertexShader, displayShader3);
+  let displayPrograms = [];
+  displayPrograms.push(createProgram(dispVertexShader, await loadShader('displayShader0.frag')));
+  displayPrograms.push(createProgram(dispVertexShader, await loadShader('displayShader1.frag')));
+  displayPrograms.push(createProgram(dispVertexShader, await loadShader('displayShader2.frag')));
 
   // // quad that fills the screen, so fragment shader is run for every pixel //
   // X, Y,  U, V  (x4)
@@ -721,7 +824,7 @@ async function mainScript(initialTex)
 
   const texture_0 = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, texture_0);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8I, sim_res_x, sim_res_y, 0, gl.RGBA_INTEGER, gl.BYTE, initialTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16UI, sim_res_x, sim_res_y, 0, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, initialTex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -729,7 +832,7 @@ async function mainScript(initialTex)
 
   const texture_1 = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, texture_1);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8I, sim_res_x, sim_res_y, 0, gl.RGBA_INTEGER, gl.BYTE, initialTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16UI, sim_res_x, sim_res_y, 0, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, initialTex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -744,7 +847,7 @@ async function mainScript(initialTex)
   gl.bindFramebuffer(gl.FRAMEBUFFER, frameBuff_1);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture_1, 0);
 
-  var copyTexbuf = new TexBuf(sim_res_x, sim_res_y);
+  copyTexbuf = new TexBuf(sim_res_x, sim_res_y);
   copyTexbuf.width = 0;  // indicate that it's
   copyTexbuf.height = 0; // empty
 
@@ -779,17 +882,13 @@ async function mainScript(initialTex)
   gl.uniform1i(gl.getUniformLocation(userInputProgram, 'tex'), 0);
   gl.uniform1i(gl.getUniformLocation(userInputProgram, 'copyTex'), 1);
 
-  gl.useProgram(displayProgram1);
-  gl.uniform2f(gl.getUniformLocation(displayProgram1, 'texelSize'), texelSizeX, texelSizeY);
-  gl.uniform2i(gl.getUniformLocation(displayProgram1, 'resolution'), sim_res_x, sim_res_y);
-  gl.uniform1i(gl.getUniformLocation(displayProgram1, 'tex'), 0);
-  gl.uniform1i(gl.getUniformLocation(displayProgram1, 'ASCCI_tex'), 1);
-
-  gl.useProgram(displayProgram2);
-  gl.uniform2f(gl.getUniformLocation(displayProgram2, 'texelSize'), texelSizeX, texelSizeY);
-  gl.uniform2i(gl.getUniformLocation(displayProgram2, 'resolution'), sim_res_x, sim_res_y);
-  gl.uniform1i(gl.getUniformLocation(displayProgram2, 'tex'), 0);
-  gl.uniform1i(gl.getUniformLocation(displayProgram2, 'ASCCI_tex'), 1);
+  for (const displayProgram of displayPrograms) { // set the same uniforms for all displayPrograms
+    gl.useProgram(displayProgram);
+    gl.uniform2f(gl.getUniformLocation(displayProgram, 'texelSize'), texelSizeX, texelSizeY);
+    gl.uniform2i(gl.getUniformLocation(displayProgram, 'resolution'), sim_res_x, sim_res_y);
+    gl.uniform1i(gl.getUniformLocation(displayProgram, 'tex'), 0);
+    gl.uniform1i(gl.getUniformLocation(displayProgram, 'ASCCI_tex'), 1);
+  }
 
   // if no save file was loaded
   // Use setup shader to set initial conditions
@@ -811,7 +910,7 @@ async function mainScript(initialTex)
     gl.bindTexture(gl.TEXTURE_2D, tex);
   }
 
-  // setInterval(calcFps, 1000); // log fps
+  setInterval(calcFps, 1000);  // log fps
 
   requestAnimationFrame(draw); // 60 fps  or other screen refresh rate
   // setInterval(draw, 1000); // reduced fps
@@ -861,7 +960,8 @@ async function mainScript(initialTex)
     }
 
 
-    if (!guiControls.paused) { // simulation loop:
+    if (!guiControls.paused || doOneIter) { // simulation loop:
+      doOneIter = false;
       gl.viewport(0, 0, sim_res_x, sim_res_y);
       gl.clearColor(0.0, 0.0, 0.0, 0.0);
       // IterPerFrame
@@ -870,10 +970,11 @@ async function mainScript(initialTex)
 
 
       if (guiControls.tool == 'text') {
+        inputType = ASCII_OFFSET;
         if (prevKey != '') { // wrote key last time
           // console.log('prevKey: ', prevKey);
           if (prevKey == 'Backspace' || prevKey == 'Enter') {
-            inputType = -32;               // print space
+            inputType += 32;               // print space
           } else if (prevKey != 'Shift') { // character printed
             userInputX += 1.;              // move cursor right
           }
@@ -881,20 +982,21 @@ async function mainScript(initialTex)
         } else if (curKey != '') {
           // console.log('curKey: ', curKey);
           if (curKey == 'Backspace') {
-            userInputX -= 1.; // Move cursor left
-
+            userInputX -= 1.;          // Move cursor left
+            if (userInputX < xStart) { // prevent cursor going further left than start of typing
+              userInputX = xStart;
+            }
           } else if (curKey == 'Enter') {
             userInputY -= 1.; // Move cursor down
             userInputX = xStart;
           } else if (curKey == 'Shift') {
           } else {                             // print valid character
-            inputType = -curKey.charCodeAt(0); // negative number represents characters
+            inputType += curKey.charCodeAt(0); // get ASCII index
           }
           prevKey = curKey;
           curKey = '';
         }
       }
-
 
       if (ACTION != NONE) { // Special action
         let nextACTION = NONE;
@@ -905,18 +1007,22 @@ async function mainScript(initialTex)
         case CUT:
           nextACTION = DELETE; // Will perform delete operation after copy
         case COPY:
-          console.log('copy');
           gl.useProgram(copyProgram);
           gl.uniform4i(gl.getUniformLocation(copyProgram, 'selection'), selectionMinX, selectionMinY, selectionMaxX, selectionMaxY);
           setTex2d(gl.TEXTURE0, texture_0);
+          setTex2d(gl.TEXTURE1, null);
+          let selectionWidth = Math.abs(selectionMaxX - selectionMinX + 1);
+          let selectionHeight = Math.abs(selectionMaxY - selectionMinY + 1);
+          copyTexbuf = new TexBuf(selectionWidth, selectionHeight);
+
           gl.bindFramebuffer(gl.FRAMEBUFFER, copyTexbuf.frameBuf);
           gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-          copyTexbuf.width = Math.abs(selectionEndX - selectionStartX);
-          copyTexbuf.height = Math.abs(selectionEndY - selectionStartY);
+          //     console.log(selectionMinX, selectionMinY, selectionMaxX, selectionMaxY, copyTexbuf.width, copyTexbuf.height);
+          guiControls.pasteRotation = 'none';
           break;
         case PASTE:
           if (copyTexbuf.width > 0) {
-            console.log('PASTE');
+            console.log(selectionMinX, selectionMinY, selectionMaxX, selectionMaxY, copyTexbuf.width, copyTexbuf.height);
             inputType = 101; // paste
           }
           break;
@@ -927,15 +1033,15 @@ async function mainScript(initialTex)
                                                   // console.log('set userInput position');
 
 
-        userInputX = mouseXinSim * sim_res_x;
-        userInputY = mouseYinSim * sim_res_y;
+        userInputX = Math.floor(mouseXinSim * sim_res_x);
+        userInputY = Math.floor(mouseYinSim * sim_res_y);
 
         switch (guiControls.tool) {
         case 'select':
           inputType = 0; // does nothing
           break;
         case 'signal':
-          inputType = 1000;
+          inputType = 200;
           break;
         case 'wire':
           inputType = 1;
@@ -946,23 +1052,28 @@ async function mainScript(initialTex)
         case 'input':
           inputType = 3;
           break;
-        case 'h2v':
+        case 'clk_input':
           inputType = 4;
           break;
-        case 'v2h':
+        case 'h2v':
           inputType = 5;
           break;
-        case 'h2vn':
+        case 'v2h':
           inputType = 6;
           break;
-        case 'v2hn':
+        case 'h2vn':
           inputType = 7;
           break;
-
+        case 'v2hn':
+          inputType = 8;
+          break;
+        case 'display':
+          inputType = 9;
+          break;
         case 'or':
           inputType = 10;
           break;
-        case 'nor':
+        case 'not/nor':
           inputType = 11;
           break;
         case 'and':
@@ -989,11 +1100,14 @@ async function mainScript(initialTex)
         case 'clk':
           inputType = 30;
           break;
-        case 'clk_2':
+        case 'clk/2':
           inputType = 31;
           break;
-        case 'clk_4':
+        case 'clk/4':
           inputType = 32;
+          break;
+        case 'clk/8':
+          inputType = 33;
           break;
         case 'text':
           xStart = userInputX;
@@ -1011,12 +1125,16 @@ async function mainScript(initialTex)
       gl.useProgram(userInputProgram);
       gl.uniform2i(gl.getUniformLocation(userInputProgram, 'pasteSize'), copyTexbuf.width, copyTexbuf.height);
       gl.uniform4i(gl.getUniformLocation(userInputProgram, 'userInputValues'), userInputX, userInputY, inputType, reverseInput);
+      gl.uniform1i(gl.getUniformLocation(userInputProgram, 'pasteRotation'), gui.getSelectedIndex('pasteRotation'));
       if (selection) {
         gl.uniform4i(gl.getUniformLocation(userInputProgram, 'selection'), selectionMinX, selectionMinY, selectionMaxX, selectionMaxY);
       } else {
         gl.uniform4i(gl.getUniformLocation(userInputProgram, 'selection'), -1, -1, -1, -1);
       }
-      // console.log(selectionStartX, selectionStartY,mouseXinSim,mouseYinSim)
+
+      gl.useProgram(displayPrograms[0]);
+      gl.uniform4i(gl.getUniformLocation(displayPrograms[0], 'userInputValues'), userInputX, userInputY, inputType, reverseInput);
+      gl.uniform1i(gl.getUniformLocation(displayPrograms[0], 'frameNum'), frameNum);
 
       for (var i = 0; i < guiControls.iterPerFrame; i++) {
         gl.useProgram(logicProgram);
@@ -1033,6 +1151,9 @@ async function mainScript(initialTex)
         IterNum++;
         gl.useProgram(logicProgram);
         gl.uniform1i(gl.getUniformLocation(logicProgram, 'IterNum'), IterNum);
+
+        let clkPeriod = Math.floor(10000 / guiControls.clockSpeed);
+        gl.uniform1i(gl.getUniformLocation(logicProgram, 'clkPeriod'), clkPeriod);
       }
     } // end of simulation part
 
@@ -1045,19 +1166,7 @@ async function mainScript(initialTex)
     setTex2d(gl.TEXTURE0, texture_0);
     setTex2d(gl.TEXTURE1, ASCII_Texture);
 
-    let currentDisplayProgram = displayProgram1;
-
-    switch (gui.getSelectedIndex('displayMode')) {
-    case 0:
-      currentDisplayProgram = displayProgram1;
-      break;
-    case 1:
-      currentDisplayProgram = displayProgram2;
-      break;
-    case 2:
-      currentDisplayProgram = displayProgram3;
-      break;
-    }
+    let currentDisplayProgram = displayPrograms[gui.getSelectedIndex('displayMode')];
 
     gl.useProgram(currentDisplayProgram);
     if (selection) {
@@ -1080,38 +1189,39 @@ async function mainScript(initialTex)
 
   async function prepareDownload()
   {
-    var newFileName = prompt('Please enter a file name. Can not include \'.\'', saveFileName);
+    selectionWidth = Math.abs(selectionMaxX - selectionMinX + 1);
+    selectionHeight = Math.abs(selectionMaxY - selectionMinY + 1);
+
+    // let savingSelection = selectionWidth > 0 && selectionHeight > 0 && guiControls.tool == 'select';
+
+    var newFileName = prompt((selection ? 'Saving selection' : 'Saving entire grid') + '\nPlease enter a file name. Can not include \'.\'', saveFileName);
 
     if (newFileName != null) {
       if (newFileName != '' && !newFileName.includes('.')) {
         saveFileName = newFileName;
 
+        let downloadX = selection ? selectionMinX : 0;
+        let downloadY = selection ? selectionMinY : 0;
+
+        let downloadWidth = selection ? selectionWidth : sim_res_x;
+        let downloadHeight = selection ? selectionHeight : sim_res_y;
+
         gl.bindFramebuffer(gl.FRAMEBUFFER, frameBuff_0);
-        // gl.readBuffer(gl.COLOR_ATTACHMENT0);
-        let textureValues = new Int8Array(4 * sim_res_x * sim_res_y);
-        gl.readPixels(0, 0, sim_res_x, sim_res_y, gl.RGBA_INTEGER, gl.BYTE, textureValues);
+        let textureValues = new Uint16Array(4 * downloadWidth * downloadHeight);
+
+        gl.readPixels(downloadX, downloadY, downloadWidth, downloadHeight, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, textureValues);
 
         let strcontrols = JSON.stringify(guiControls);
 
         let saveDataArray = [
           Uint32Array.of(saveFileVersionID),
-          Uint16Array.of(sim_res_x),
-          Uint16Array.of(sim_res_y),
+          Uint16Array.of(downloadWidth),
+          Uint16Array.of(downloadHeight),
           textureValues,
           strcontrols,
         ];
         let blob = new Blob(saveDataArray); // combine everything into a single blob
         download(saveFileName + '.logicsim', blob);
-        /*
-        let arrBuff = await blob.arrayBuffer(); // turn into array
-        let arr = new Uint8Array(arrBuff);
-        let compressed = window.pako.deflate(arr); // compress
-        let compressedBlob = new Blob(
-                [Uint32Array.of(saveFileVersionID), compressed],
-                { type: "application/x-binary" }
-        ); // turn back into blob and add version id in front
-        download(saveFileName + ".weathersim4", compressedBlob);
-        */
       } else {
         alert('You didn\'t enter a valid file name!');
       }
@@ -1195,29 +1305,16 @@ async function mainScript(initialTex)
 
   function isPageHidden() { return (document.hidden || document.msHidden || document.webkitHidden || document.mozHidden); }
 
-  /*
-  function calcFps() {
-          if (!isPageHidden()) {
-                  var FPS = frameNum - lastFrameNum;
-                  lastFrameNum = frameNum;
+  function calcFps()
+  {
+    if (!isPageHidden()) {
+      var FPS = frameNum - lastFrameNum;
+      lastFrameNum = frameNum;
 
-                  const fpsTarget = 60;
-
-                  if (controls.auto_IterPerFrame && !controls.paused) {
-                          console.log(
-                                  FPS +
-                                          " FPS   " +
-                                          controls.IterPerFrame +
-                                          " Iterations / frame      " +
-                                          FPS * controls.IterPerFrame +
-                                          " Iterations / second"
-                          );
-                          adjIterPerFrame((FPS / fpsTarget - 1.0) * 5.0); //
-  example: ((30 / 60)-1.0) = -0.5
-
-                          if (FPS == fpsTarget) adjIterPerFrame(1);
-                  }
-          }
+      if (!guiControls.paused) {
+        console.log(FPS + " FPS   " + guiControls.iterPerFrame + " Iterations / frame      " + FPS * guiControls.iterPerFrame + " Iterations / second");
+      }
+    }
   }
-  */
+
 } // end of mainscript

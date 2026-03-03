@@ -147,12 +147,10 @@ void main()
 
   float wire = min(Xwire + Ywire, 1.0);
 
-  const vec3 wireOffCol = vec3(0.1, 0.1, 0); // dark green
-  const vec3 wireOnCol = vec3(0.1, 0.3, 0);  // light green
+  const vec3 wireOffCol = vec3(0.3, 0.3, 0); // dark green
+  const vec3 wireOnCol = vec3(0.3, 1.0, 0);  // light green
 
   const vec3 displayOnCol = vec3(1.0, 0., 0);
-
-  const vec3 MemOnCol = vec3(1.0, 1.0, 0);
 
   col += wire * wireOffCol;
 
@@ -163,13 +161,11 @@ void main()
   }
 
   if (col.r > 0.5) {
-    col = vec3(0.2); // texture brightness
+    col = vec3(1.);
   } else if (col.g > 0.5) {
     if (getStrength(dataIn[CENTER][SIGNAL_PRIMA]) > 0) {
       if (dataIn[CENTER][CELLTYPE] == CELLTYPE_DISP)
         col = displayOnCol;
-      else if (dataIn[CENTER][CELLTYPE] == CELLTYPE_MEM)
-        col = MemOnCol;
       else
         col = wireOnCol;
     } else {
@@ -181,8 +177,6 @@ void main()
   } else if (col.b > 0.5) {
     if ((dataIn[CENTER][SIGNAL_SECON] > 0)) // Xwire > 0.0
       col = wireOnCol;
-    else if (dataIn[CENTER][SIGNAL_SECON] == CELLTYPE_MEM)
-      col = MemOnCol;
     else
       col = wireOffCol;
   }
