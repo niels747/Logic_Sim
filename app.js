@@ -512,6 +512,9 @@ async function mainScript(initialTex)
       prevMouseY = mouseY;
     } else if (event.button == 2) { // right mouse
       selection = false;
+      if (guiControls.tool == 'text') {
+        guiControls.tool = 'select';
+      }
     }
   });
 
